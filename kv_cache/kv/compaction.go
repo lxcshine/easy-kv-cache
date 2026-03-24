@@ -25,21 +25,20 @@ func (db *DB) Merge() error {
 		key := k.(string)
 		pos := v.(*LogRecordPos)
 
-		// 1. 从旧文件中读取出有效数据
+		// 从旧文件中读取出有效数据
 		encRecord, err := db.dataFile.Read(pos.Offset, pos.Size)
 		if err != nil {
 			mergeErr = err
 			return false // 遇到错误，返回false停止遍历
 		}
 
-		// 2. 将有效数据追加写入到新的merge文件中
+		// 将有效数据追加写入到新的merge文件中
 		newOffset, err := mergeFile.Write(encRecord)
 		if err != nil {
 			mergeErr = err
 			return false
 		}
 
-		// 3. 更新内存索引，将它的指针指向新文件的位置
 		db.index.data.Store(key, &LogRecordPos{Offset: newOffset, Size: pos.Size})
 
 		return true // 返回true继续遍历下一个key
@@ -52,7 +51,6 @@ func (db *DB) Merge() error {
 	// 确保新文件的数据全部强制刷入物理硬盘
 	mergeFile.Sync()
 
-	// 移花接木：关闭文件句柄，删掉充满垃圾的旧文件，把新文件改名为旧文件
 	db.dataFile.Close()
 	mergeFile.Close()
 
