@@ -4,7 +4,7 @@
 
 1、```cd kv_cache```
 
-2、下载数据citylots.json，链接：https://github.com/cpbotha/crappy-citylots-examples
+2、下载数据citylots.json，放在main.go的同级目录里。链接：https://github.com/cpbotha/crappy-citylots-examples
 
 3、```go run main.go```
 
