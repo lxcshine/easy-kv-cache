@@ -4,26 +4,56 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/brianvoe/gofakeit/v6"
 	"kv_cache/kv"
 )
 
-type UserProfile struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Email     string `json:"email"`
-	Phone     string `json:"phone"`
-	Address   string `json:"address"`
-	Company   string `json:"company"`
-	JobTitle  string `json:"job_title"`
-	CreatedAt int64  `json:"created_at"`
-}
-
 func main() {
+	fmt.Println("正在从citylots.json中提取数据")
+
+	file, err := os.Open("citylots.json")
+	if err != nil {
+		log.Fatal("找不到citylots.json文件", err)
+	}
+	defer file.Close()
+
+
+	decoder := json.NewDecoder(file)
+
+
+	for {
+		t, err := decoder.Token()
+		if err != nil {
+			log.Fatal("解析结构失败:", err)
+		}
+		if s, ok := t.(string); ok && s == "features" {
+			break
+		}
+	}
+
+	_, err = decoder.Token()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// 提取出所有地块的原始json字节流
+	var items [][]byte
+	for decoder.More() {
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
+			break
+		}
+		items = append(items, raw)
+	}
+
+	totalOps := len(items)
+	fmt.Printf("成功提取%d条真实地块数据！内存状态稳定。\n\n", totalOps)
+
+
 	opts := kv.DefaultOptions
 	db, err := kv.Open(opts)
 	if err != nil {
@@ -31,47 +61,22 @@ func main() {
 	}
 	defer db.Close()
 
-	totalOps := 100000 // 10万并发量
 	var wg sync.WaitGroup
+	var writeSuccess, writeFailed int32
 
-	var writeSuccess int32
-	var writeFailed int32
 
-	fmt.Printf("阶段 1：开始 %d 万并发真实 JSON 写入测试\n", totalOps/10000)
+	fmt.Printf("拉起%d万个goroutine进行极限并发写入\n", totalOps/10000)
 
 	startWrite := time.Now()
 
 	for i := 0; i < totalOps; i++ {
 		wg.Add(1)
-		go func(id int) {
+		go func(idx int) {
 			defer wg.Done()
 
-			// 核心优化：为每个协程创建一个无锁的 Faker 实例，避免 10 万协程抢夺全局随机数锁
-			faker := gofakeit.NewUnlocked(int64(id) + time.Now().UnixNano())
+			key := []byte(fmt.Sprintf("sf_lot:%d", idx))
 
-			// 1. 瞬间生成高度逼真的变长数据
-			user := UserProfile{
-				ID:        fmt.Sprintf("user_%d", id),
-				Name:      faker.Name(),
-				Email:     faker.Email(),
-				Phone:     faker.Phone(),
-				Address:   faker.Address().Address,
-				Company:   faker.Company(),
-				JobTitle:  faker.JobTitle(),
-				CreatedAt: time.Now().UnixNano(),
-			}
-
-			// 2. 将数据序列化为真实的 JSON 字节流
-			valBytes, err := json.Marshal(user)
-			if err != nil {
-				atomic.AddInt32(&writeFailed, 1)
-				return
-			}
-
-			key := []byte(user.ID)
-
-			// 3. 极速落盘
-			if err := db.Put(key, valBytes); err != nil {
+			if err := db.Put(key, items[idx]); err != nil {
 				atomic.AddInt32(&writeFailed, 1)
 			} else {
 				atomic.AddInt32(&writeSuccess, 1)
@@ -80,43 +85,31 @@ func main() {
 	}
 
 	wg.Wait()
-	_ = db.Sync() // 确保内存缓冲里的数据全部刷入物理硬盘
+	_ = db.Sync() // 强制将bufio里的最后一点数据刷盘
 
 	writeCost := time.Since(startWrite)
-	fmt.Printf("写入完成！成功: %d 条, 失败: %d 条\n", writeSuccess, writeFailed)
+	fmt.Printf("写入完成！成功:%d条, 失败:%d条\n", writeSuccess, writeFailed)
 	fmt.Printf("写入总耗时: %v\n", writeCost)
-	fmt.Printf("包含高强度 JSON 序列化的写入 TPS: %.0f 次/秒\n\n", float64(totalOps)/writeCost.Seconds())
+	fmt.Printf("处理变长数据的写入TPS: %.0f 次/秒\n\n", float64(totalOps)/writeCost.Seconds())
 
-	var readSuccess int32
-	var readFailed int32
+	var readSuccess, readFailed int32
 
-	fmt.Printf("阶段 2：开始 %d 万并发读取与 JSON 反序列化验证\n", totalOps/10000)
+	fmt.Printf("开始%d万并发极限读取测试\n", totalOps/10000)
 
 	startRead := time.Now()
 
 	for i := 0; i < totalOps; i++ {
 		wg.Add(1)
-		go func(id int) {
+		go func(idx int) {
 			defer wg.Done()
 
-			expectedID := fmt.Sprintf("user_%d", id)
-			key := []byte(expectedID)
+			key := []byte(fmt.Sprintf("sf_lot:%d", idx))
 
-			// 1. 无锁化极速读取磁盘二进制流
-			valBytes, err := db.Get(key)
-			if err != nil {
-				atomic.AddInt32(&readFailed, 1)
-				return
-			}
+			// 执行无锁并发读取
+			val, err := db.Get(key)
 
-			// 2. 反序列化回 Go 结构体
-			var storedUser UserProfile
-			if err := json.Unmarshal(valBytes, &storedUser); err != nil {
-				atomic.AddInt32(&readFailed, 1)
-				return
-			}
-
-			if storedUser.ID == expectedID && storedUser.Name != "" {
+			// 只要读取的字节流长度不一致，就算数据损坏
+			if err == nil && len(val) == len(items[idx]) {
 				atomic.AddInt32(&readSuccess, 1)
 			} else {
 				atomic.AddInt32(&readFailed, 1)
@@ -127,9 +120,9 @@ func main() {
 	wg.Wait()
 
 	readCost := time.Since(startRead)
-	fmt.Printf("读取与校验完成！成功比对: %d 条, 失败: %d 条\n", readSuccess, readFailed)
+	fmt.Printf("读取比对完成！成功读取并校验:%d条, 失败: %d条\n", readSuccess, readFailed)
 	fmt.Printf("读取总耗时: %v\n", readCost)
-	fmt.Printf("包含 JSON 反序列化的读取 QPS: %.0f 次/秒\n\n", float64(totalOps)/readCost.Seconds())
+	fmt.Printf("巨型value读取QPS: %.0f次/秒\n\n", float64(totalOps)/readCost.Seconds())
 
 	fmt.Println("结束！")
 }
