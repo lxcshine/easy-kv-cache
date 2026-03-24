@@ -6,10 +6,9 @@ import (
 	"sync"
 )
 
-// DataFile 管理磁盘上的数据文件
 type DataFile struct {
 	File   *os.File
-	Writer *bufio.Writer // 核心优化：引入内存写缓冲
+	Writer *bufio.Writer
 	Offset int64
 	mu     sync.Mutex
 }
@@ -22,7 +21,7 @@ func OpenDataFile(path string) (*DataFile, error) {
 	stat, _ := file.Stat()
 	return &DataFile{
 		File: file,
-		// 使用 64KB 的缓冲区
+
 		Writer: bufio.NewWriterSize(file, 64*1024),
 		Offset: stat.Size(),
 	}, nil
@@ -33,7 +32,6 @@ func (df *DataFile) Write(data []byte) (int64, error) {
 	defer df.mu.Unlock()
 
 	offset := df.Offset
-	// 写入内存缓冲而不是直接刷盘，速度提升百倍
 	n, err := df.Writer.Write(data)
 	if err != nil {
 		return 0, err
