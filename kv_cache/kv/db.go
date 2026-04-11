@@ -116,7 +116,6 @@ func (db *DB) Put(key, value []byte) error {
 			return err
 		}
 
-		// 4. 更新内存索引 (指向 VLog)
 		db.index.Put(key, &LogRecordPos{Offset: vlogOffset, Size: uint32(len(value)), IsInVLog: true})
 
 	} else {
@@ -146,7 +145,6 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 		return val, nil
 	}
 
-	// 关卡 3：查询内存索引
 	pos := db.index.Get(key)
 	if pos == nil {
 		return nil, ErrKeyNotFound
@@ -155,12 +153,9 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 	var valBytes []byte
 	var err error // 这里的 err 是必需的，用于接收两个分支可能抛出的异常
 
-	// 关卡 4：分流读取
 	if pos.IsInVLog {
-		// 大文件：去 vlog.kv 里面读
 		valBytes, err = db.vlog.Read(pos.Offset, pos.Size)
 	} else {
-		// 小文件：去 data.kv 里面读 (修复了之前忽略 err 的小 Bug)
 		var encRecord []byte
 		encRecord, err = db.dataFile.Read(pos.Offset, pos.Size)
 		if err == nil {
@@ -168,7 +163,6 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 		}
 	}
 
-	// 统一处理可能发生的物理磁盘读取错误
 	if err != nil {
 		return nil, err
 	}
