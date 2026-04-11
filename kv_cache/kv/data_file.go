@@ -32,6 +32,7 @@ func (df *DataFile) Write(data []byte) (int64, error) {
 	defer df.mu.Unlock()
 
 	offset := df.Offset
+
 	n, err := df.Writer.Write(data)
 	if err != nil {
 		return 0, err

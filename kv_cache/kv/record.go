@@ -3,24 +3,23 @@ package kv
 import "encoding/binary"
 
 const (
-	RecordNormal  byte = iota // 正常数据
-	RecordDeleted             // 表示删除
+	RecordNormal byte = iota
+	RecordDeleted
+	RecordVLog
 )
 
-// 写入磁盘的日志记录
 type LogRecord struct {
 	Key   []byte
 	Value []byte
 	Type  byte
 }
 
-// 内存索引位置信息
 type LogRecordPos struct {
-	Offset int64  // 记录在文件中的起始位置
-	Size   uint32 // 记录在文件中的总长度
+	Offset   int64
+	Size     uint32
+	IsInVLog bool
 }
 
-// 记录编码为字节流
 func EncodeLogRecord(rec *LogRecord) []byte {
 	headerSize := 1 + 4 + 4
 	buf := make([]byte, headerSize+len(rec.Key)+len(rec.Value))
@@ -34,7 +33,6 @@ func EncodeLogRecord(rec *LogRecord) []byte {
 	return buf
 }
 
-// 从字节流中解码出记录
 func DecodeLogRecord(buf []byte) *LogRecord {
 	recType := buf[0]
 	keySize := binary.LittleEndian.Uint32(buf[1:5])
