@@ -1,12 +1,8 @@
-这是一个使用```golang```实现的轻便```KV```存储引擎，核心功能只有7个代码文件。
+这是一个使用```golang```实现的轻便```KV```存储引擎。
 
-这是本人在学习```KV```存储时写的一个简易练手项目，引入写缓冲与无锁哈希，实现十万并发极速读写。通过以下步骤运行：
+内置的布隆过滤器与LRU块缓存非常适合作为RAG架构中的高频元数据与向量标识检索层。
 
-1、```cd kv_cache```
 
-2、下载数据citylots.json，放在main.go的同级目录里。链接：https://github.com/cpbotha/crappy-citylots-examples
-
-3、```go run main.go```
 
 
 
